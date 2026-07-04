@@ -39,9 +39,23 @@ on top of it without changes to the pipeline.
   backoff before a message is given up on, so a short MongoDB restart
   does not crash the consumer or silently drop data.
 - **Dockerfiles** for producer and consumer install exact pinned
-  dependency versions (`kafka-python`, `requests`, `pymongo`) so builds
+  dependency versions (`confluent-kafka`, `requests`, `pymongo`) so builds
   are reproducible on any machine, independent of the local Python
   installation.
+- **Troubleshooting:** two non-obvious issues came up during testing.
+  First, the pure-Python `kafka-python` client silently hung on message
+  fetch against the current Kafka broker version, which was only visible
+  once end-to-end message flow was actually verified rather than trusting
+  a clean startup log; switching to the official `confluent-kafka` client
+  resolved it. Second, the consumer never received any messages even
+  though the producer was publishing successfully, because Kafka's
+  default `offsets.topic.replication.factor` of 3 cannot be satisfied on
+  a single-broker cluster, so the internal `__consumer_offsets` topic was
+  never created and consumer-group coordination failed silently. Setting
+  `KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1` (and the equivalent
+  transaction-log settings) in `docker-compose.yml` fixed it. Both issues
+  were only found by actually running the full pipeline end-to-end and
+  checking the resulting MongoDB collection, not by reading logs alone.
 - **`docker-compose.yml`** wires all four services together on a shared
   Docker network, with named volumes for Kafka and MongoDB so data
   survives container restarts.
