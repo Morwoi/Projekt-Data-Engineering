@@ -138,8 +138,8 @@ architecture.
 Requirements: Docker Desktop (or Docker Engine + Compose plugin).
 
 ```bash
-git clone <this-repository-url>
-cd <repository-folder>
+git clone https://github.com/Morwoi/Projekt-Data-Engineering.git
+cd Projekt-Data-Engineering
 docker compose up --build
 ```
 

@@ -2,7 +2,7 @@ Nachname-Vorname_MATRNR_DataEngineering_P2_S
 
 # Explanation: Implementation of the Stream Processing Pipeline
 
-**GitHub repository:** `<INSERT-YOUR-GITHUB-URL-HERE>`
+**GitHub repository:** https://github.com/Morwoi/Projekt-Data-Engineering
 
 ## System description and expected usage
 
