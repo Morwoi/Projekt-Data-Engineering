@@ -1,17 +1,11 @@
 """
-Sensor data producer for the municipal environmental monitoring pipeline.
+Kafka producer for the municipal environmental sensor pipeline.
 
-Polls the public Open-Meteo weather API (https://open-meteo.com, no API key
-required) once per configured interval for a list of simulated sensor
-stations spread across a city. Each response is normalized into a flat
-JSON "sensor reading" and published to a Kafka topic.
-
-If the API is temporarily unreachable (network outage, timeout, rate limit,
-non-2xx response), the producer falls back to a local synthetic-data
-simulator so the stream never stops -- this is the required fallback/backup
-behaviour for Task 2 ("does not break if data is temporarily inaccessible").
-Every message carries a "source" field ("api" or "simulated") so downstream
-consumers and dashboards can distinguish real from fallback readings.
+Polls the Open-Meteo weather API once per interval for five simulated
+sensor stations and publishes each reading as JSON to Kafka. Falls back
+to a local simulator if the API is unreachable, so the stream keeps
+running through an outage. Each message carries a "source" field ("api"
+or "simulated") so consumers can tell real readings from fallback ones.
 """
 
 import json
@@ -42,12 +36,8 @@ API_BASE_URL = os.environ.get(
 )
 CURRENT_VARS = "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,surface_pressure"
 
-# Simulated sensor stations placed at fixed points across one city (Hamburg
-# is used as a concrete, real stand-in so distances/coordinates are
-# realistic -- not because the scenario is specific to Hamburg). All five
-# points are within roughly 8km of each other, i.e. actually "across the
-# city" rather than across the country.
-# In production, this list would come from a station/asset registry table.
+# Five fixed points around Hamburg, standing in for real sensor stations.
+# In production this would come from a station registry instead.
 STATIONS = [
     {"station_id": "station-01", "name": "City Center", "latitude": 53.5511, "longitude": 9.9937},
     {"station_id": "station-02", "name": "Harbor District", "latitude": 53.5396, "longitude": 9.9686},
@@ -56,9 +46,7 @@ STATIONS = [
     {"station_id": "station-05", "name": "Green Belt", "latitude": 53.5700, "longitude": 10.0600},
 ]
 
-# Last known-good reading per station, used as a seed for the fallback
-# simulator so simulated values stay in a plausible range instead of jumping
-# to an arbitrary default.
+# Seeds the fallback simulator with each station's last real reading.
 _last_good = {}
 
 _shutdown = False
@@ -75,9 +63,8 @@ signal.signal(signal.SIGTERM, _handle_shutdown)
 
 
 def connect_producer(retries=30, delay=5):
-    """Create the Kafka producer and wait until the cluster metadata can
-    actually be fetched, so the container survives Kafka starting up
-    slower than the producer during `docker compose up`."""
+    """Create the producer and retry until Kafka is reachable (it starts
+    slower than this container on `docker compose up`)."""
     producer = Producer({
         "bootstrap.servers": KAFKA_BOOTSTRAP_SERVERS,
         "acks": "all",
@@ -127,9 +114,8 @@ def fetch_from_api(station):
 
 
 def simulate_reading(station):
-    """Fallback generator: a small random walk around the last known-good
-    values (or sensible defaults on the very first call) so the pipeline
-    keeps producing plausible-looking data during an API outage."""
+    """Small random walk around the last known-good reading, or a
+    sensible default on the first call for a station."""
     seed = _last_good.get(station["station_id"], {
         "temperature_c": 18.0,
         "humidity_pct": 60.0,

@@ -1,16 +1,12 @@
 """
-Pipeline health check for the municipal environmental sensor project.
+Pipeline health check for the sensor project.
 
-Connects directly to MongoDB (the sink of the Kafka -> MongoDB pipeline) and
-reports, per station, the latest stored reading and how long ago it arrived.
-A station is flagged STALE if its newest reading is older than three times
-the producer's fetch interval -- a simple, dependency-free way to see
-whether the pipeline is actually moving data end-to-end, not just whether
-the containers are up.
+Connects to MongoDB and reports, per station, the latest stored reading
+and how long ago it arrived. A station is flagged STALE if its newest
+reading is older than three times the producer's fetch interval.
 
 Run from the host (requires `pip install pymongo`) while
-`docker compose up` is running, since MongoDB's port is published to
-localhost:27017:
+`docker compose up` is running:
 
     python scripts/check_status.py
 """
@@ -60,12 +56,8 @@ def main():
           + ("  [!] check sensor_readings_dead_letters" if dead_letter_count else ""))
     print()
 
-    # A non-empty dead-letter collection means a reading was permanently
-    # given up on (see consumer/consumer.py) -- that's a delivery-reliability
-    # failure, not a cosmetic detail, so it has to affect the exit code the
-    # same way staleness does. Printing the count without failing on it would
-    # mean a cron/CI job driven by this script's exit status stays green
-    # while readings are quietly being dropped.
+    # Dead letters mean a reading was permanently dropped, so this should
+    # affect the exit code the same way staleness does.
     dead_letters_present = dead_letter_count > 0
 
     if total == 0:

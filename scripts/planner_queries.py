@@ -1,24 +1,16 @@
 """
-City-planner query example for the municipal environmental sensor project.
+City-planner query example for the sensor pipeline.
 
-Tutor feedback on the concept/explanation drafts pointed out that "a
-regression is not a day-by-day operation" -- a planner doing trend analysis
-should not be handed 8,640 raw 10-second samples per station per day and
-told to query MongoDB like a transactional store. This script shows the
-query strategy planners are actually expected to use: a MongoDB aggregation
-pipeline that rolls raw readings up into daily per-station statistics
-(mean/min/max per metric, reading count), which is what a planning
-dashboard or a regression/trend model would consume.
+Planners doing trend analysis shouldn't be handed 8,640 raw 10-second
+samples per station per day. This script shows the intended query
+pattern instead: a MongoDB aggregation that rolls raw readings up into
+daily per-station statistics (mean/min/max per metric, reading count),
+which is what a planning dashboard or trend model would actually consume.
 
-Raw readings are only retained for RAW_RETENTION_DAYS (see
-consumer/consumer.py, default 90 days, enforced by a TTL index) -- long
-enough to compute meaningful daily/weekly trends and to re-run this
-aggregation over the recent past, but not an unbounded archive. A
-dashboard that needs history beyond that window would persist this
-aggregation's output (e.g. into its own `daily_station_stats` collection)
-before the underlying raw documents expire; that materialization step is
-out of scope for this prototype but the query below is exactly what would
-feed it.
+Raw readings are only kept for RAW_RETENTION_DAYS (see consumer/consumer.py,
+default 90 days, TTL-enforced). A dashboard needing history beyond that
+window would persist this aggregation's output (see
+materialize_daily_stats.py) before the raw documents expire.
 
 Run from the host (requires `pip install pymongo`) while
 `docker compose up` is running:
@@ -46,10 +38,8 @@ METRICS = ["temperature_c", "humidity_pct", "wind_speed_kmh", "pressure_hpa"]
 
 
 def daily_trend(collection, days=30, station_id=None):
-    """Aggregation pipeline: one document per (station, day) with
-    mean/min/max per metric, total precipitation, and how many raw
-    readings the aggregate is based on. This is the shape a regression or
-    a trend chart actually consumes -- not a stream of raw readings."""
+    """Aggregates raw readings into one document per (station, day) with
+    mean/min/max per metric, total precipitation, and reading count."""
     group_fields = {}
     for metric in METRICS:
         group_fields[f"{metric}_avg"] = {"$avg": f"${metric}"}
@@ -62,11 +52,10 @@ def daily_trend(collection, days=30, station_id=None):
         initial_match["station_id"] = station_id
 
     pipeline = [
-        # Cheap pre-filter on the indexed (station_id, timestamp) string
-        # fields before the more expensive date parsing/grouping below.
+        # Pre-filter on the indexed string fields before parsing dates.
         {"$match": initial_match},
-        # timestamp is stored as an ISO-8601 string (see producer.py); parse
-        # it to a real date so it can be truncated to a calendar day.
+        # timestamp is stored as an ISO string; parse to a real date so
+        # it can be truncated to a calendar day.
         {"$addFields": {"_ts": {"$dateFromString": {"dateString": "$timestamp"}}}},
         {"$group": {
             "_id": {

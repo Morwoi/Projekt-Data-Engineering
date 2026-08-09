@@ -1,25 +1,15 @@
 """
-Automated verification that the citizen-app reliability contract
-(scripts/citizen_status.py) actually catches a real sensor outage -- not
-just that the logic reads correctly on paper.
+Checks that the citizen-app reliability contract (citizen_status.py)
+actually catches a real sensor outage, not just that the logic looks
+correct on paper.
 
-Why this script exists: the Phase 2 write-up claims that when Open-Meteo
-is unreachable, citizen_status.py correctly flags the affected station as
-UNAVAILABLE instead of showing stale/synthetic data as current -- because
-the producer's fallback simulator is *designed* to keep publishing
-fresh-looking readings during an outage, and a naive "how old is the
-newest message" check would be fooled by that. That claim was never
-actually run end-to-end before this script existed. This does that:
-forces a real outage against a running stack, polls the live contract,
-and prints a timestamped transcript of every status transition so the
-claim can be checked against real output.
-
-How the outage is induced: no real network is blocked. Instead, the
-producer's Open-Meteo request timeout is forced to ~0 via
-API_TIMEOUT_SECONDS=0.001 (see docker-compose.yml), so every API call
-times out immediately and the producer's existing fallback path takes
-over on its own -- this exercises the exact code path a real outage would
-trigger, without needing firewall/network manipulation.
+Forces the producer's Open-Meteo request timeout to ~0
+(API_TIMEOUT_SECONDS=0.001, see docker-compose.yml), so every API call
+fails immediately and the producer's existing fallback path takes over -
+the same code path a real outage would trigger, without needing any
+firewall/network manipulation. Then it polls the live contract and prints
+a timestamped transcript of every status transition, and restores the
+normal timeout afterwards to confirm the status returns to "ok".
 
 Requires the stack to already be running (`docker compose up -d`) and the
 `docker` CLI on PATH.
@@ -42,10 +32,8 @@ from citizen_status import get_all_station_statuses, MONGO_DB, MONGO_COLLECTION 
 
 MONGO_URI = os.environ.get("MONGO_URI", "mongodb://localhost:27018")
 POLL_SECONDS = 5
-# citizen_status.py's thresholds at the default 10s fetch interval are
-# STALE_AFTER=30s, SIMULATED_GRACE=60s, UNAVAILABLE_AFTER=90s -- watch past
-# all three with margin so the full ok -> stale -> unavailable path (or the
-# masked-simulator -> unavailable path) has time to actually happen.
+# citizen_status.py's thresholds at the default 10s interval top out at
+# 90s (UNAVAILABLE_AFTER), so watch comfortably past that.
 OUTAGE_WATCH_SECONDS = 130
 RECOVERY_WATCH_SECONDS = 60
 
@@ -59,9 +47,7 @@ def recreate_producer(api_timeout_seconds):
 
 
 def watch(collection, station_id, duration_seconds, label):
-    """Poll the live citizen-status contract and print only the moments the
-    status actually changes, so the transcript reads as a timeline of
-    transitions instead of a wall of repeated identical lines."""
+    """Poll the citizen-status contract and print only status changes."""
     last_status = None
     deadline = time.time() + duration_seconds
     while time.time() < deadline:

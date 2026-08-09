@@ -46,52 +46,35 @@ loses data.
   architecture, since Kafka messages and MongoDB documents are both
   schema-flexible.
 
-### Addressing tutor feedback: two user types need different guarantees
+### Two different reliability needs: planners vs. a citizen-facing app
 
-Kafka's delivery reliability (nothing lost between producer and MongoDB)
-and what each end user actually needs are not the same thing:
+Kafka's delivery guarantee (nothing lost between producer and MongoDB) is
+not the same thing as what each end user actually needs from the data:
 
-- **Planners** don't want raw 10-second samples -- `planner_queries.py`
-  rolls readings up into daily per-station statistics instead, and
+- **Planners** don't want raw 10-second samples. `planner_queries.py` rolls
+  readings up into daily per-station statistics instead, and
   `materialize_daily_stats.py` persists that rollup into
   `daily_station_stats` so history survives past the 90-day TTL on raw
   readings (see "Retention" below).
 - **A citizen deciding whether to go outside** needs to know the *current*
-  reading is trustworthy, not just that some reading was stored. The
-  producer's fallback simulator keeps publishing fresh-looking synthetic
-  data during an API outage (by design, so the pipeline itself never
-  stalls) -- which means "message age" alone would report a broken sensor
-  as fine. `citizen_status.py` tracks the age of the last *real*
-  (`source="api"`) reading separately and classifies each station as
-  `ok` / `stale` / `unavailable` accordingly; see the module docstring for
-  the full reasoning. `verify_citizen_failover.py` forces a real outage
-  against the running stack and checks this behaviour actually happens,
-  rather than only asserting it.
+  reading is trustworthy, not just that some reading was stored. During an
+  API outage the fallback simulator keeps publishing fresh-looking
+  synthetic data so the pipeline itself doesn't stall, which means
+  "message age" alone would report a broken sensor as fine.
+  `citizen_status.py` separately tracks the age of the last *real*
+  (`source="api"`) reading and classifies each station as
+  `ok` / `stale` / `unavailable` based on that instead (see the module
+  docstring for the full logic).
 
-**Verified run** (2026-08-09, against the live stack, station-01):
+`verify_citizen_failover.py` forces a real outage against the running
+stack and checks that the status actually flips to `unavailable` and back
+to `ok`, rather than just trusting the logic on paper. Try it yourself
+against the running stack:
 
+```bash
+docker compose up -d
+python scripts/verify_citizen_failover.py
 ```
-Baseline: OK  Reading reflects current conditions.
-
-Forcing an Open-Meteo outage (API_TIMEOUT_SECONDS=0.001, producer recreated)...
-[07:11:48] (outage) station-01: -> OK  Reading reflects current conditions.
-[07:12:28] (outage) station-01: -> UNAVAILABLE  This station's real sensor has not
-  returned a genuine reading in over 60s -- data is currently being synthesized by
-  a fallback simulator to keep the pipeline running and does not reflect real
-  conditions. Tell the citizen the sensor is broken; do not show a value.
-
-Restoring the real API (API_TIMEOUT_SECONDS back to default, producer recreated)...
-[07:14:09] (recovery) station-01: -> UNAVAILABLE  (same advisory as above)
-[07:14:29] (recovery) station-01: -> OK  Reading reflects current conditions.
-
-Result: outage watch ended at UNAVAILABLE, recovery watch ended at OK -- PASS.
-```
-
-This is the concrete evidence for the "fragile elderly citizen" scenario
-from tutor feedback: the app-facing contract correctly stopped presenting
-a value as current within 40s of the real sensor going dark, even though
-the pipeline itself kept producing fresh-looking synthetic readings the
-whole time -- and correctly resumed once the real sensor came back.
 
 ## Architecture
 

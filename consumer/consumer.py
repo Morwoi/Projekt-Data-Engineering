@@ -1,23 +1,16 @@
 """
-Sensor data consumer for the municipal environmental monitoring pipeline.
+Kafka consumer for the municipal environmental sensor pipeline.
 
-Reads JSON sensor readings from a Kafka topic and persists them into
-MongoDB. Offsets are committed manually, only after a successful write, so
-that a MongoDB outage or transient write error causes the message to be
-retried instead of silently lost (at-least-once delivery). Because
-at-least-once delivery can redeliver the same message, writes are upserts
-keyed on (station_id, timestamp) rather than plain inserts, so a redelivery
-updates the existing document instead of creating a duplicate. MongoDB
-writes are retried with backoff before a message is given up on; if all
-retries fail, the reading is parked in a dead-letter collection instead of
-being silently dropped.
+Reads readings from Kafka and writes them to MongoDB. Offsets are only
+committed after a successful write (at-least-once delivery), and writes
+are upserts keyed on (station_id, timestamp) so a redelivered message
+updates instead of duplicating. Writes are retried with backoff; if a
+message still fails after all retries it goes into a dead-letter
+collection instead of being dropped.
 
-Each stored document also gets a `stored_at` BSON date, backing a TTL index
-that expires raw readings after RAW_RETENTION_DAYS (default 90). Planner
-analysis works off daily/weekly aggregates (see
-scripts/planner_queries.py), not individual raw samples, so raw data does
-not need to be kept indefinitely; this keeps the collection bounded on a
-long-running deployment.
+Raw readings expire after RAW_RETENTION_DAYS (default 90) via a TTL index
+on `stored_at`, since planners work off the daily aggregates in
+scripts/planner_queries.py rather than raw samples.
 """
 
 import json
@@ -48,15 +41,11 @@ MONGO_COLLECTION = os.environ.get("MONGO_COLLECTION", "sensor_readings")
 MAX_WRITE_RETRIES = int(os.environ.get("MAX_WRITE_RETRIES", "5"))
 RETRY_BACKOFF_SECONDS = float(os.environ.get("RETRY_BACKOFF_SECONDS", "2"))
 
-# How long raw, per-reading documents are kept before MongoDB expires them.
-# Planners analyze trends (daily/weekly aggregates, regression), not
-# individual 10-second samples, so indefinite raw retention isn't needed;
-# see scripts/planner_queries.py for the aggregation queries this supports.
+# How long raw readings are kept before the TTL index expires them.
 RAW_RETENTION_DAYS = float(os.environ.get("RAW_RETENTION_DAYS", "90"))
 
-# Dead letters need a human to look at them, so they're kept much longer
-# than raw readings -- but still bounded, so a bad week doesn't leave this
-# collection growing forever after the messages in it are long resolved.
+# Dead letters are kept longer since a human needs to review them, but
+# still bounded so they don't grow forever.
 DEAD_LETTER_RETENTION_DAYS = float(os.environ.get("DEAD_LETTER_RETENTION_DAYS", "30"))
 
 
@@ -99,20 +88,15 @@ def connect_mongo(retries=30, delay=5):
 
 
 def write_with_retry(collection, document):
-    """Upsert one reading by its natural key (station_id, timestamp), retrying
-    on transient MongoDB errors. Using upsert instead of insert_one makes the
-    write idempotent: Kafka's at-least-once delivery means the same message
-    can be redelivered (e.g. consumer crash between write and offset commit),
-    and without a natural-key upsert that would create duplicate documents.
-    Returns True if the write eventually succeeded, False if it was given up
-    on (caller decides what to do with the message)."""
+    """Upsert by (station_id, timestamp) so a redelivered message updates
+    instead of duplicating. Retries transient errors with backoff; returns
+    False if all retries are exhausted."""
     natural_key = {
         "station_id": document["station_id"],
         "timestamp": document["timestamp"],
     }
-    # A separate BSON-date field (distinct from the ISO-string "timestamp"
-    # the reading carries) so a TTL index can expire raw documents -- Mongo
-    # TTL indexes only work on a real Date type.
+    # stored_at is a real BSON date (unlike the ISO string "timestamp"),
+    # which the TTL index requires.
     to_store = {**document, "stored_at": datetime.now(timezone.utc)}
     for attempt in range(1, MAX_WRITE_RETRIES + 1):
         try:
@@ -132,11 +116,9 @@ def write_with_retry(collection, document):
 
 
 def ensure_ttl_index(collection, field, expire_after_seconds):
-    """Create the TTL index, tolerating a RAW_RETENTION_DAYS change across
-    restarts. MongoDB refuses to redefine an existing index's options
-    in-place (IndexOptionsConflict, code 85) -- it would rather the caller
-    drop and recreate it, which is what we do here instead of crashing on
-    startup just because the retention window changed."""
+    """Create the TTL index. MongoDB errors (code 85) if the index already
+    exists with different options, so drop and recreate it instead of
+    crashing when RAW_RETENTION_DAYS changes between restarts."""
     try:
         collection.create_index(field, expireAfterSeconds=expire_after_seconds)
     except OperationFailure as exc:
@@ -151,16 +133,13 @@ def ensure_ttl_index(collection, field, expire_after_seconds):
 
 
 def move_to_dead_letters(dead_letters, document, reason):
-    """Best-effort: park a message that could not be written after all
-    retries so it isn't silently lost. If MongoDB is unreachable even for
-    this write, we can only log -- there is no further fallback."""
+    """Park a message that failed all write retries instead of dropping
+    it. Best-effort: if Mongo is unreachable for this write too, we just
+    log it."""
     try:
         dead_letters.insert_one({
             "reading": document,
             "reason": reason,
-            # A real BSON date, not a Unix float -- required for the TTL
-            # index in main() to work at all (Mongo TTL indexes only expire
-            # documents on a Date-typed field).
             "failed_at": datetime.now(timezone.utc),
         })
     except PyMongoError as exc:
@@ -198,9 +177,8 @@ def main():
             )
         else:
             move_to_dead_letters(dead_letters, reading, "mongo write retries exhausted")
-        # Commit even on a given-up message: a poison message must not
-        # block the whole partition forever. It has already been parked in
-        # the dead-letter collection above for manual follow-up.
+        # Commit even on failure so one bad message doesn't block the
+        # partition; it's already in the dead-letter collection.
         consumer.commit(message=message, asynchronous=False)
 
 

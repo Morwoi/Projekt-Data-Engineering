@@ -2,18 +2,15 @@
 Materializes planner_queries.py's daily aggregation into a persistent
 `daily_station_stats` collection, upserted per (station_id, day).
 
-This resolves a tension the Phase 2 write-up named but left open:
 planner_queries.py recomputes the daily rollup on demand from raw
-readings, but raw readings expire after RAW_RETENTION_DAYS (see
+readings, but those expire after RAW_RETENTION_DAYS (see
 consumer/consumer.py) via a TTL index. Anything a planner wants to trend
-over longer than that window has to be persisted before the underlying
-raw documents disappear -- otherwise "30-day trend" silently degrades to
-"however much of the last 90 days hasn't expired yet" and nobody notices
-until the query returns less history than expected.
+over longer than that window needs to be persisted before the underlying
+raw documents expire.
 
 In production this would run once per day via cron shortly after
-midnight UTC (the day being aggregated should be fully closed first).
-For this prototype, run it manually or on whatever schedule you control:
+midnight UTC. For this prototype, run it manually or on whatever schedule
+you control:
 
     python scripts/materialize_daily_stats.py --days 2
 """
@@ -34,10 +31,9 @@ DAILY_STATS_COLLECTION = os.environ.get("DAILY_STATS_COLLECTION", "daily_station
 
 
 def materialize(source_collection, target_collection, days, station_id=None):
-    """Recompute the daily aggregation over the requested window and upsert
-    each (station, day) row into the target collection. Idempotent: running
-    this twice for the same day just overwrites that day's row, so a missed
-    cron run can safely be caught up by widening --days on the next run."""
+    """Recompute the daily aggregation over the requested window and
+    upsert each (station, day) row. Idempotent, so a missed cron run can
+    be caught up by widening --days on the next run."""
     target_collection.create_index(
         [("station_id", 1), ("day", 1)], unique=True
     )
