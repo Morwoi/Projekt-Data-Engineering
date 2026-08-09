@@ -42,14 +42,18 @@ API_BASE_URL = os.environ.get(
 )
 CURRENT_VARS = "temperature_2m,relative_humidity_2m,wind_speed_10m,precipitation,surface_pressure"
 
-# Simulated sensor stations placed at fixed points across a (fictional) city.
+# Simulated sensor stations placed at fixed points across one city (Hamburg
+# is used as a concrete, real stand-in so distances/coordinates are
+# realistic -- not because the scenario is specific to Hamburg). All five
+# points are within roughly 8km of each other, i.e. actually "across the
+# city" rather than across the country.
 # In production, this list would come from a station/asset registry table.
 STATIONS = [
-    {"station_id": "station-01", "name": "City Center", "latitude": 52.5200, "longitude": 13.4050},
-    {"station_id": "station-02", "name": "Harbor District", "latitude": 53.5511, "longitude": 9.9937},
-    {"station_id": "station-03", "name": "Industrial Park", "latitude": 51.2277, "longitude": 6.7735},
-    {"station_id": "station-04", "name": "Residential North", "latitude": 52.3667, "longitude": 4.8945},
-    {"station_id": "station-05", "name": "Green Belt", "latitude": 48.1351, "longitude": 11.5820},
+    {"station_id": "station-01", "name": "City Center", "latitude": 53.5511, "longitude": 9.9937},
+    {"station_id": "station-02", "name": "Harbor District", "latitude": 53.5396, "longitude": 9.9686},
+    {"station_id": "station-03", "name": "Industrial Park", "latitude": 53.5100, "longitude": 9.9400},
+    {"station_id": "station-04", "name": "Residential North", "latitude": 53.6000, "longitude": 10.0300},
+    {"station_id": "station-05", "name": "Green Belt", "latitude": 53.5700, "longitude": 10.0600},
 ]
 
 # Last known-good reading per station, used as a seed for the fallback

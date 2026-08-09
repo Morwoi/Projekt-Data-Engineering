@@ -4,6 +4,11 @@ services:
     container_name: kafka
     ports:
       - "9092:9092"
+      # Matches KAFKA_ADVERTISED_LISTENERS' PLAINTEXT_HOST://localhost:29092
+      # below -- without publishing this port, a host-side Kafka client
+      # (e.g. kafkacat, a GUI tool) would be handed an address by the
+      # broker that it can't actually reach.
+      - "29092:29092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
@@ -14,6 +19,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 5
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -32,7 +38,12 @@ services:
     image: mongo:7
     container_name: mongo
     ports:
-      - "27017:27017"
+      # Host port 27018, not the default 27017: on some machines a native
+      # MongoDB install/service already owns 27017, and connections to
+      # localhost:27017 would then silently reach that other database
+      # instead of this project's container. Internal service-to-service
+      # traffic (producer/consumer -> mongo:27017) is unaffected either way.
+      - "27018:27017"
     volumes:
       - mongo_data:/data/db
     healthcheck:
@@ -53,6 +64,11 @@ services:
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       KAFKA_TOPIC: sensor-readings
       FETCH_INTERVAL_SECONDS: "10"
+      # Overridable from the host shell (default: producer.py's own default
+      # of 5s) so scripts/verify_citizen_failover.py can force every
+      # Open-Meteo request to time out -- and the fallback simulator to take
+      # over -- without touching real networking. See that script for why.
+      API_TIMEOUT_SECONDS: "${API_TIMEOUT_SECONDS:-5}"
     restart: unless-stopped
     networks:
       - sensor-net
@@ -72,6 +88,14 @@ services:
       MONGO_URI: mongodb://mongo:27017
       MONGO_DB: environment_monitoring
       MONGO_COLLECTION: sensor_readings
+      # How long raw readings are kept before a TTL index expires them.
+      # Planners work off daily/weekly aggregates (scripts/planner_queries.py),
+      # not raw samples, so this bounds collection growth on a long-running
+      # deployment instead of retaining every 10s sample forever.
+      RAW_RETENTION_DAYS: "90"
+      # Dead letters are kept longer than raw readings (a human needs to
+      # act on them) but are still bounded via TTL -- see consumer.py.
+      DEAD_LETTER_RETENTION_DAYS: "30"
     restart: unless-stopped
     networks:
       - sensor-net
