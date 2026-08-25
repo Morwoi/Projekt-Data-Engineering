@@ -1,4 +1,4 @@
-Nachname-Vorname_MATRNR_DataEngineering_P1_S
+Wohlgenannt-Markus_IU14080395_DataEngineering_P1_S
 
 # Stream Processing Pipeline for Municipal Environmental Sensors
 

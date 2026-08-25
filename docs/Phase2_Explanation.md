@@ -1,4 +1,4 @@
-Nachname-Vorname_MATRNR_DataEngineering_P2_S
+Wohlgenannt-Markus_IU14080395_DataEngineering_P2_S
 
 # Explanation: Implementation of the Stream Processing Pipeline
 
@@ -49,7 +49,11 @@ figures and reports what share of each day's readings were real
 (api_coverage_pct). Averaging in synthetic values would have made a
 trend number less trustworthy with nothing showing that in the output,
 so a planner can spot and discount a low-confidence day themselves
-rather than that going unnoticed inside the average.
+rather than that going unnoticed inside the average. Writing this also
+surfaced a leftover inconsistency in the phase 1 concept, which had
+described a planner wanting the latest reading within seconds; that
+contradicted the daily-trend design above, so I corrected the phase 1
+user story to match before this submission.
 
 For the citizen app, citizen_status.py separates "the data was
 delivered" from "this specific reading is safe to show as current".
