@@ -7,8 +7,8 @@ pattern instead: a MongoDB aggregation that rolls raw readings up into
 daily per-station statistics (mean/min/max per metric, reading count),
 which is what a planning dashboard or trend model would actually consume.
 
-Metric stats are computed from real (source="api") readings only --
-see daily_trend()'s docstring for why blending in fallback-simulator
+Metric stats are computed from real (source="api") readings only.
+See daily_trend()'s docstring for why blending in fallback-simulator
 values would be a problem for a planner specifically.
 
 Raw readings are only kept for RAW_RETENTION_DAYS (see consumer/consumer.py,
@@ -45,14 +45,15 @@ def daily_trend(collection, days=30, station_id=None):
     """Aggregates raw readings into one document per (station, day) with
     mean/min/max per metric, total precipitation, and reading count.
 
-    The mean/min/max/precipitation figures are computed from source="api"
-    readings only. Averaging in fallback-simulator readings would quietly
-    make a day's trend number less trustworthy with no visible sign of
-    it -- the same failure mode citizen_status.py already refuses to
-    allow for a single reading, just harder to notice in an aggregate.
-    api_reading_count/simulated_count/api_coverage_pct let a planner see,
-    and decide how much to trust, a given day's numbers instead of that
-    being silently baked in.
+    The mean/min/max/precipitation figures use source="api" readings
+    only. Averaging in fallback-simulator readings would make a day's
+    trend number less trustworthy without anything in the output showing
+    that. citizen_status.py already refuses to do this for a single
+    reading; this is the same idea applied to an aggregate, just harder
+    to notice there if you don't guard against it. api_reading_count,
+    simulated_count and api_coverage_pct expose how much of a day's
+    number actually rests on real measurements, so that's something the
+    caller can weigh instead of it being decided for them.
     """
     group_fields = {}
     for metric in METRICS:
@@ -151,10 +152,10 @@ def main():
     print("Temp/Humidity/Wind/Precip figures above are computed from real "
           "(source=\"api\") readings only; fallback-simulator readings never "
           "enter these numbers. 'API cov.' is the share of that day's readings "
-          "that were real -- a day at 0% had no real readings at all, so its "
+          "that were real. A day at 0% had no real readings at all, so its "
           "averages show as 'n/a' rather than a synthetic-only number.")
     if low_coverage_days:
-        print(f"[!] {low_coverage_days} day(s) below 50% API coverage -- treat "
+        print(f"[!] {low_coverage_days} day(s) below 50% API coverage: treat "
               "those trend points as low-confidence even though a number is shown.")
 
 

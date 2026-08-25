@@ -1,36 +1,34 @@
 """
 Citizen-app reliability contract for the sensor pipeline.
 
-Delivery reliability (no reading lost between producer and MongoDB, see
-consumer/consumer.py) is not the same thing as presentation reliability:
-whether the *newest stored reading* is still a trustworthy description of
-*current* conditions. Two things can break the second one:
+consumer/consumer.py already guarantees delivery: no reading gets lost
+between producer and MongoDB. That's a different guarantee from what a
+citizen app actually needs, though. The newest stored reading can still
+be an unreliable description of *current* conditions for two reasons:
 
-1. Nothing has arrived recently (message age, the obvious case).
-2. Something is arriving on schedule, but it isn't real. When Open-Meteo
-   is unreachable, the producer's fallback simulator keeps publishing
-   fresh-looking readings every cycle so the pipeline itself doesn't stall
-   (see producer/producer.py). A citizen app that only checks message age
-   would report a broken sensor as fine indefinitely, since the synthetic
-   data keeps its timestamp current.
+1. Nothing recent has arrived (plain message age, the obvious case).
+2. Something arrives on schedule, but it's fake. During an Open-Meteo
+   outage, the producer's fallback simulator (producer/producer.py)
+   keeps publishing fresh timestamps every cycle so the pipeline itself
+   doesn't stall. Checking message age alone would call a broken sensor
+   "fine" indefinitely, since the synthetic data's timestamp is current.
 
-Each station is classified into one of three states, with an advisory
-message the app is expected to show:
+get_all_station_statuses() classifies each station into one of three
+states, each with an advisory message the app is expected to show:
 
-- "ok"          a real (source="api") reading is fresh enough to trust.
-- "stale"       a real reading exists but is older than STALE_AFTER_SECONDS.
-- "unavailable" either nothing recent has arrived, or the station has been
+- "ok"          a real (source="api") reading, fresh enough to trust
+- "stale"       a real reading exists but is older than STALE_AFTER_SECONDS
+- "unavailable" nothing recent has arrived, or the station has been
                 running on the fallback simulator longer than
-                SIMULATED_GRACE_SECONDS with no real reading in between.
+                SIMULATED_GRACE_SECONDS with no real reading in between
 
-A reading that's fine to show as "a bit older, use with caution" to the
-general public isn't necessarily an acceptable basis for a health-sensitive
-person to decide whether it's safe to go outside. The optional
-`risk_profile` argument ("standard", default, or "vulnerable") scales how
-early these thresholds fire and how directive the advisory text is:
-"vulnerable" halves the thresholds and, once a reading counts as stale,
-tells the app to actively recommend against relying on it rather than
-just labelling its age.
+The optional `risk_profile` argument ("standard", default, or
+"vulnerable") controls how fast these fire. "A bit older, use with
+caution" might be a fine label for the general public, but it's not
+necessarily an acceptable basis for a health-sensitive person deciding
+whether it's safe to go outside. "vulnerable" halves the thresholds and,
+once a reading counts as stale, switches the advisory from a passive age
+label to actively recommending against relying on it.
 
 Run from the host (requires `pip install pymongo`) while
 `docker compose up` is running:
@@ -116,7 +114,7 @@ def classify(latest, latest_real_age_seconds, now, risk_profile="standard"):
             "advisory": (
                 "This station's real sensor has not returned a genuine "
                 "reading in over "
-                f"{simulated_grace:.0f}s -- data is currently being "
+                f"{simulated_grace:.0f}s. Data is currently being "
                 "synthesized by a fallback simulator to keep the pipeline "
                 "running and does not reflect real conditions. Tell the "
                 "citizen the sensor is broken; do not show a value."
@@ -130,7 +128,7 @@ def classify(latest, latest_real_age_seconds, now, risk_profile="standard"):
         if risk_profile == "vulnerable":
             advisory = (
                 f"Last reading is {age_seconds:.0f}s old. For a vulnerable "
-                "profile, do not present this as current conditions -- "
+                "profile, do not present this as current conditions; "
                 "advise waiting for a fresh reading or checking another "
                 "source before going outside."
             )
@@ -185,7 +183,7 @@ def main():
     collection = client[MONGO_DB][MONGO_COLLECTION]
     station_ids = sorted(collection.distinct("station_id"))
     if not station_ids:
-        print("No readings stored yet -- check producer/consumer logs.")
+        print("No readings stored yet, check producer/consumer logs.")
         sys.exit(1)
 
     statuses = get_all_station_statuses(collection, station_ids, args.risk_profile)

@@ -48,21 +48,22 @@ loses data.
 
 ### Two different reliability needs: planners vs. a citizen-facing app
 
-Kafka's delivery guarantee (nothing lost between producer and MongoDB) is
-not the same thing as what each end user actually needs from the data, and
-the two needs aren't even the same *kind* of reliability:
+Kafka guarantees delivery (nothing lost between producer and MongoDB), but
+that's a different question from what a planner or a citizen actually needs
+from the data day to day. We ended up handling those two cases quite
+differently:
 
 - **Planners** don't want raw 10-second samples. `planner_queries.py` rolls
   readings up into daily per-station statistics instead, and
   `materialize_daily_stats.py` persists that rollup into
   `daily_station_stats` so history survives past the 90-day TTL on raw
-  readings (see "Retention" below). The rollup's mean/min/max/precipitation
-  figures are computed from real (`source="api"`) readings only -- blending
-  in fallback-simulator values would quietly make a day's trend number less
-  trustworthy with no visible sign of it. Each daily row also reports
-  `api_coverage_pct`, the share of that day's readings that were real, so a
-  planner can see (and discount) a low-confidence day instead of that being
-  silently baked into the average.
+  readings (see "Retention" below). The mean/min/max/precipitation figures
+  only use real (`source="api"`) readings; mixing in fallback-simulator
+  values would make a day's number less trustworthy with nothing in the
+  output to show it. Each daily row also reports `api_coverage_pct`, the
+  share of that day's readings that were real, so a planner can decide for
+  themselves whether to discount a low-confidence day rather than that
+  being baked into the average behind their back.
 - **A citizen deciding whether to go outside** needs to know the *current*
   reading is trustworthy, not just that some reading was stored. During an
   API outage the fallback simulator keeps publishing fresh-looking
@@ -71,13 +72,12 @@ the two needs aren't even the same *kind* of reliability:
   `citizen_status.py` separately tracks the age of the last *real*
   (`source="api"`) reading and classifies each station as
   `ok` / `stale` / `unavailable` based on that instead (see the module
-  docstring for the full logic). It also accepts a `--risk-profile`
-  (`standard`, default, or `vulnerable`): a reading that's fine to label
-  "a bit older, use with caution" for the general public isn't necessarily
-  an acceptable basis for a health-sensitive person to decide whether it's
-  safe to go outside, so `vulnerable` halves the thresholds and tells the
-  app to actively recommend against relying on a stale reading rather than
-  just showing its age.
+  docstring for the full logic). It also takes a `--risk-profile`
+  (`standard`, default, or `vulnerable`). "A bit older, use with caution"
+  might be a fine label for most people but not for someone with a health
+  condition deciding whether to go outside, so `vulnerable` halves the
+  thresholds and tells the app to actively recommend against relying on a
+  stale reading rather than just showing its age.
 
 `verify_citizen_failover.py` forces a real outage against the running
 stack and checks that the status actually flips to `unavailable` and back
@@ -118,15 +118,15 @@ python scripts/verify_citizen_failover.py
 ```
 
 Kafka runs in single-node KRaft mode (no ZooKeeper dependency), which keeps
-the local prototype simple while using the same broker software and wire
-protocol used in distributed, multi-broker production deployments -- moving
-to a cloud-hosted, multi-node Kafka cluster later requires only a
-configuration change, not a rewrite. The `sensor-readings` topic is created
-with 5 partitions (matching the number of stations) and messages are keyed
-by `station_id`, so additional consumers in the same consumer group would
+the local prototype simple while still using the same broker software and
+wire protocol as a distributed, multi-broker production deployment, so
+moving to a cloud-hosted, multi-node cluster later is a configuration
+change, not a rewrite. The `sensor-readings` topic is created with 5
+partitions (matching the number of stations) and messages are keyed by
+`station_id`, so additional consumers in the same consumer group would
 parallelize by station once more than one is deployed. Running only one
-broker locally means there is no replication/fault-tolerance for the data
-topic itself -- an accepted limitation of the local prototype, not of the
+broker locally does mean there's no replication or fault tolerance for the
+data topic itself; that's a limitation of the local prototype, not of the
 architecture.
 
 ## How to run
@@ -141,8 +141,7 @@ docker compose up --build
 
 This builds the producer and consumer images, starts Kafka and MongoDB,
 waits for both to report healthy, and then starts streaming simulated
-sensor readings into MongoDB automatically -- no manual setup steps
-required.
+sensor readings into MongoDB automatically. No manual setup steps needed.
 
 To inspect the stored data:
 
@@ -166,9 +165,9 @@ pip install pymongo
 python scripts/check_status.py
 ```
 
-To see the query strategy a city planner would actually use -- daily
+To see the query strategy a city planner would actually use (daily
 per-station trend aggregates computed from real readings only, with an
-API-coverage figure for each day:
+API-coverage figure for each day):
 
 ```bash
 python scripts/planner_queries.py --days 30
@@ -186,28 +185,28 @@ python scripts/citizen_status.py --risk-profile vulnerable
 
 To persist the daily aggregation into a `daily_station_stats` collection
 (needed once history is wanted beyond `RAW_RETENTION_DAYS`, since raw
-readings expire on a TTL index -- see `consumer/consumer.py`):
+readings expire on a TTL index, see `consumer/consumer.py`):
 
 ```bash
 python scripts/materialize_daily_stats.py --days 2
 ```
 
-To verify -- not just assert -- that the citizen-status contract catches a
-real Open-Meteo outage instead of being fooled by the fallback simulator's
-fresh-looking synthetic readings (requires `docker compose up -d` running
-and the `docker` CLI on PATH; takes a few minutes, forces the producer's
-API timeout to ~0 and back via `API_TIMEOUT_SECONDS`):
+To actually verify, not just assume, that the citizen-status contract
+catches a real Open-Meteo outage instead of being fooled by the fallback
+simulator's fresh-looking synthetic readings (requires `docker compose up
+-d` running and the `docker` CLI on PATH; takes a few minutes, forces the
+producer's API timeout to ~0 and back via `API_TIMEOUT_SECONDS`):
 
 ```bash
 python scripts/verify_citizen_failover.py
 ```
 
 MongoDB's port is published to the host as **27018**, not the default
-27017 -- this avoids silently colliding with a locally installed MongoDB
-service some machines already run on 27017 (connecting to the wrong
-database there produces no error, just wrong/empty results). Container-to-
-container traffic (producer/consumer -> `mongo:27017`) is unaffected since
-it never goes through the published host port.
+27017. That's to avoid clashing with a locally installed MongoDB service
+some machines already run on 27017 (connecting to the wrong database there
+produces no error, just wrong/empty results). Container-to-container
+traffic (producer/consumer -> `mongo:27017`) is unaffected since it never
+goes through the published host port.
 
 To stop everything:
 

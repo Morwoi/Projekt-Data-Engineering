@@ -49,7 +49,7 @@ def main():
     total = collection.count_documents({})
     dead_letter_count = dead_letters.count_documents({})
 
-    print(f"Pipeline status -- {MONGO_DB}.{MONGO_COLLECTION}")
+    print(f"Pipeline status: {MONGO_DB}.{MONGO_COLLECTION}")
     print("=" * 72)
     print(f"Total readings stored : {total}")
     print(f"Dead-letter messages  : {dead_letter_count}"
@@ -61,7 +61,7 @@ def main():
     dead_letters_present = dead_letter_count > 0
 
     if total == 0:
-        print("No readings stored yet -- check producer/consumer logs.")
+        print("No readings stored yet, check producer/consumer logs.")
         sys.exit(1)
 
     station_ids = collection.distinct("station_id")
@@ -90,11 +90,11 @@ def main():
 
     print()
     if any_stale:
-        print("[!] At least one station has not reported recently -- "
+        print("[!] At least one station has not reported recently, "
               "check `docker logs sensor-producer` / `sensor-consumer`.")
     if dead_letters_present:
         print(f"[!] {dead_letter_count} message(s) exhausted retries and were "
-              "parked in the dead-letter collection -- check "
+              "parked in the dead-letter collection. Check "
               "`sensor_readings_dead_letters` and `docker logs sensor-consumer`.")
     if any_stale or dead_letters_present:
         sys.exit(1)

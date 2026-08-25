@@ -109,7 +109,7 @@ def write_with_retry(collection, document):
             )
             time.sleep(RETRY_BACKOFF_SECONDS * attempt)
     log.error(
-        "Giving up on message for %s after %s attempts -- moving to dead letters",
+        "Giving up on message for %s after %s attempts, moving to dead letters",
         document.get("station_id"), MAX_WRITE_RETRIES,
     )
     return False

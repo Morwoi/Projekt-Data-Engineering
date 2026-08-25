@@ -76,7 +76,7 @@ def main():
     collection = client[MONGO_DB][MONGO_COLLECTION]
     station_ids = sorted(collection.distinct("station_id"))
     if not station_ids:
-        print("No readings stored yet -- let the pipeline run for a bit first.")
+        print("No readings stored yet, let the pipeline run for a bit first.")
         sys.exit(1)
     station_id = args.station or station_ids[0]
 
@@ -84,32 +84,32 @@ def main():
     baseline = get_all_station_statuses(collection, [station_id])[station_id]
     print(f"Baseline: {baseline['status'].upper()}  {baseline['advisory']}")
     if baseline["status"] != "ok":
-        print("(Baseline is not OK -- the real API may already be unreachable "
+        print("(Baseline is not OK. The real API may already be unreachable "
               "from this network, or the pipeline just started. Results below "
               "may not show a clean transition.)")
 
     print("\nForcing an Open-Meteo outage (API_TIMEOUT_SECONDS=0.001, producer recreated)...")
     recreate_producer(api_timeout_seconds=0.001)
 
-    print(f"Watching for up to {OUTAGE_WATCH_SECONDS}s -- expect a transition "
+    print(f"Watching for up to {OUTAGE_WATCH_SECONDS}s, expecting a transition "
           f"through STALE and/or masked-by-simulator to UNAVAILABLE:\n")
     final_outage_status = watch(collection, station_id, OUTAGE_WATCH_SECONDS, "outage")
 
     print("\nRestoring the real API (API_TIMEOUT_SECONDS back to default, producer recreated)...")
     recreate_producer(api_timeout_seconds=5)
 
-    print(f"Watching for up to {RECOVERY_WATCH_SECONDS}s -- expect a return to OK:\n")
+    print(f"Watching for up to {RECOVERY_WATCH_SECONDS}s, expecting a return to OK:\n")
     final_recovery_status = watch(collection, station_id, RECOVERY_WATCH_SECONDS, "recovery")
 
     print("\nResult:")
     print(f"  status at end of outage watch   : {final_outage_status}")
     print(f"  status at end of recovery watch : {final_recovery_status}")
     if final_outage_status == "unavailable" and final_recovery_status == "ok":
-        print("  PASS -- the contract caught the outage and recovered.")
+        print("  PASS: the contract caught the outage and recovered.")
         sys.exit(0)
     else:
         print("  Did not observe the expected OK -> UNAVAILABLE -> OK cycle "
-              "within the watch windows -- re-run, or widen "
+              "within the watch windows. Re-run, or widen "
               "OUTAGE_WATCH_SECONDS/RECOVERY_WATCH_SECONDS above.")
         sys.exit(1)
 

@@ -33,36 +33,36 @@ usage instructions are in the repository's README.md.
 
 ## Reflection on feedback so far
 
-Earlier feedback was that the two user types were sketched as
-superficial stories, and that Kafka's delivery reliability is not the
-same thing as what a planner or a citizen actually needs from the data
-operationally - concretely: how much data and what kind of query does
-planning actually require, and how does "reliable" cash out for a
-citizen deciding whether it's safe to go outside?
+The feedback on phase 1 was that the two user types were sketched as
+superficial stories, and that Kafka's delivery reliability doesn't
+actually tell you what a planner or a citizen needs from the data day
+to day. Concretely: how much data, and what kind of query, does
+planning really require, and what does "reliable" mean for a citizen
+deciding whether it's safe to go outside?
 
-I addressed both with working code, not just description. For
-planners, planner_queries.py answers the query question directly: a
-MongoDB aggregation rolls raw 10-second readings up into daily
-per-station mean/min/max, because a regression is not a day-by-day
-operation. It also excludes fallback-simulator readings from those
+I tried to answer both with working code rather than more description.
+For planners, planner_queries.py answers the query question directly:
+a MongoDB aggregation rolls raw 10-second readings up into daily
+per-station mean/min/max, since a regression is never a day-by-day
+operation. It also leaves fallback-simulator readings out of those
 figures and reports what share of each day's readings were real
-(api_coverage_pct) - averaging in synthetic values would quietly make a
-trend number less trustworthy with no visible sign of it, so a planner
-can see and discount a low-confidence day instead of that being baked
-into the number silently.
+(api_coverage_pct). Averaging in synthetic values would have made a
+trend number less trustworthy with nothing showing that in the output,
+so a planner gets to see and discount a low-confidence day instead of
+that being decided for them.
 
 For the citizen app, citizen_status.py separates "the data was
-delivered" from "this specific reading is safe to show as current":
-during an outage the fallback simulator keeps producing fresh-looking
-readings, so message age alone would report a broken sensor as fine.
-Beyond that distinction, I also operationalized that "reliable enough"
-is itself use-case-dependent: a reading that's fine to label "a bit
-older, use with caution" for the general public is not necessarily an
-acceptable basis for a health-sensitive person (e.g. an elderly citizen
-deciding whether to go outside) to act on. citizen_status.py now takes
-an optional risk_profile ("standard" or "vulnerable") that halves the
-staleness thresholds and switches the advisory text from a passive age
-label to an active recommendation against relying on the reading.
+delivered" from "this specific reading is safe to show as current".
+During an outage the fallback simulator keeps producing fresh-looking
+readings, so message age alone would call a broken sensor fine. On top
+of that, "reliable enough" turned out to be use-case-dependent too: a
+reading that's okay to label "a bit older, use with caution" for the
+general public isn't necessarily something a health-sensitive person
+(an elderly citizen deciding whether to go outside, for example)
+should act on. citizen_status.py now takes an optional risk_profile
+("standard" or "vulnerable") that halves the staleness thresholds and
+turns the advisory from a passive age label into an active
+recommendation against relying on the reading.
 
 verify_citizen_failover.py forces a real outage against the running
 stack and checks that the status contract actually flips to

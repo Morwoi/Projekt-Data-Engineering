@@ -140,7 +140,7 @@ def build_reading(station):
         _last_good[station["station_id"]] = metrics
     except (requests.RequestException, KeyError, ValueError) as exc:
         log.warning(
-            "Open-Meteo unreachable for %s (%s) -- using fallback simulator",
+            "Open-Meteo unreachable for %s (%s), using fallback simulator",
             station["station_id"], exc,
         )
         metrics = simulate_reading(station)
