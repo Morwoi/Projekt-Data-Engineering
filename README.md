@@ -57,7 +57,8 @@ differently:
   readings up into daily per-station statistics instead, and
   `materialize_daily_stats.py` persists that rollup into
   `daily_station_stats` so history survives past the 90-day TTL on raw
-  readings (see "Retention" below). The mean/min/max/precipitation figures
+  readings (see `RAW_RETENTION_DAYS` under "Configuration" below). The
+  mean/min/max/precipitation figures
   only use real (`source="api"`) readings; mixing in fallback-simulator
   values would make a day's number less trustworthy with nothing in the
   output to show it. Each daily row also reports `api_coverage_pct`, the

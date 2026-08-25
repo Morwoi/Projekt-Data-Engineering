@@ -23,8 +23,9 @@ later as extra fields without touching the pipeline itself.
 The pipeline continuously ingests environmental data so that (a) city
 planners can analyze trends later through dashboards, and (b) a
 citizen-facing app can warn residents when values cross recommended
-thresholds. Two user stories: a planner wants the latest readings per
-district within seconds of measurement; a citizen-app backend wants to
+thresholds. Two user stories: a planner wants a reliable daily trend per
+district to prioritize interventions, built from complete data rather
+than a flood of raw per-second readings; a citizen-app backend wants to
 poll new values without missing any, even after a brief outage. The
 system succeeds if no reading is ever silently lost and data stays
 available with low latency; it fails if the stream stalls on a temporary

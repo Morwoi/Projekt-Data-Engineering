@@ -48,8 +48,8 @@ operation. It also leaves fallback-simulator readings out of those
 figures and reports what share of each day's readings were real
 (api_coverage_pct). Averaging in synthetic values would have made a
 trend number less trustworthy with nothing showing that in the output,
-so a planner gets to see and discount a low-confidence day instead of
-that being decided for them.
+so a planner can spot and discount a low-confidence day themselves
+rather than that going unnoticed inside the average.
 
 For the citizen app, citizen_status.py separates "the data was
 delivered" from "this specific reading is safe to show as current".
