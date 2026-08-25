@@ -23,12 +23,23 @@ message the app is expected to show:
                 running on the fallback simulator longer than
                 SIMULATED_GRACE_SECONDS with no real reading in between.
 
+A reading that's fine to show as "a bit older, use with caution" to the
+general public isn't necessarily an acceptable basis for a health-sensitive
+person to decide whether it's safe to go outside. The optional
+`risk_profile` argument ("standard", default, or "vulnerable") scales how
+early these thresholds fire and how directive the advisory text is:
+"vulnerable" halves the thresholds and, once a reading counts as stale,
+tells the app to actively recommend against relying on it rather than
+just labelling its age.
+
 Run from the host (requires `pip install pymongo`) while
 `docker compose up` is running:
 
     python scripts/citizen_status.py
+    python scripts/citizen_status.py --risk-profile vulnerable
 """
 
+import argparse
 import os
 import sys
 from datetime import datetime, timezone
@@ -52,12 +63,26 @@ STATUS_OK = "ok"
 STATUS_STALE = "stale"
 STATUS_UNAVAILABLE = "unavailable"
 
+# Scales how early the thresholds above fire. A health-sensitive citizen
+# pays a higher price for acting on a reading that turns out to be stale
+# or synthetic than the general public does, so "vulnerable" halves the
+# time budget before "stale"/"unavailable" kicks in.
+RISK_PROFILES = {
+    "standard": 1.0,
+    "vulnerable": 0.5,
+}
 
-def classify(latest, latest_real_age_seconds, now):
+
+def classify(latest, latest_real_age_seconds, now, risk_profile="standard"):
     """Classify a station's latest reading into ok/stale/unavailable. Age
     alone isn't enough - a station only counts as trustworthy if backed
     by a recent real (source="api") reading, not just the fallback
     simulator keeping the pipeline alive."""
+    factor = RISK_PROFILES.get(risk_profile, 1.0)
+    stale_after = STALE_AFTER_SECONDS * factor
+    unavailable_after = UNAVAILABLE_AFTER_SECONDS * factor
+    simulated_grace = SIMULATED_GRACE_SECONDS * factor
+
     if latest is None:
         return {
             "status": STATUS_UNAVAILABLE,
@@ -70,7 +95,7 @@ def classify(latest, latest_real_age_seconds, now):
     timestamp = datetime.fromisoformat(latest["timestamp"])
     age_seconds = (now - timestamp).total_seconds()
 
-    if age_seconds > UNAVAILABLE_AFTER_SECONDS:
+    if age_seconds > unavailable_after:
         return {
             "status": STATUS_UNAVAILABLE,
             "age_seconds": age_seconds,
@@ -83,7 +108,7 @@ def classify(latest, latest_real_age_seconds, now):
             ),
         }
 
-    if latest_real_age_seconds is None or latest_real_age_seconds > SIMULATED_GRACE_SECONDS:
+    if latest_real_age_seconds is None or latest_real_age_seconds > simulated_grace:
         return {
             "status": STATUS_UNAVAILABLE,
             "age_seconds": age_seconds,
@@ -91,21 +116,29 @@ def classify(latest, latest_real_age_seconds, now):
             "advisory": (
                 "This station's real sensor has not returned a genuine "
                 "reading in over "
-                f"{SIMULATED_GRACE_SECONDS:.0f}s -- data is currently being "
+                f"{simulated_grace:.0f}s -- data is currently being "
                 "synthesized by a fallback simulator to keep the pipeline "
                 "running and does not reflect real conditions. Tell the "
                 "citizen the sensor is broken; do not show a value."
             ),
         }
 
-    if age_seconds <= STALE_AFTER_SECONDS:
+    if age_seconds <= stale_after:
         status, advisory = STATUS_OK, "Reading reflects current conditions."
     else:
         status = STATUS_STALE
-        advisory = (
-            f"Last reading is {age_seconds:.0f}s old and may no longer reflect "
-            "current conditions. Show it labeled with its age, not as \"now\"."
-        )
+        if risk_profile == "vulnerable":
+            advisory = (
+                f"Last reading is {age_seconds:.0f}s old. For a vulnerable "
+                "profile, do not present this as current conditions -- "
+                "advise waiting for a fresh reading or checking another "
+                "source before going outside."
+            )
+        else:
+            advisory = (
+                f"Last reading is {age_seconds:.0f}s old and may no longer reflect "
+                "current conditions. Show it labeled with its age, not as \"now\"."
+            )
 
     return {
         "status": status,
@@ -115,7 +148,7 @@ def classify(latest, latest_real_age_seconds, now):
     }
 
 
-def get_all_station_statuses(collection, station_ids):
+def get_all_station_statuses(collection, station_ids, risk_profile="standard"):
     now = datetime.now(timezone.utc)
     result = {}
     for station_id in station_ids:
@@ -129,11 +162,18 @@ def get_all_station_statuses(collection, station_ids):
         if latest_real is not None:
             real_timestamp = datetime.fromisoformat(latest_real["timestamp"])
             latest_real_age_seconds = (now - real_timestamp).total_seconds()
-        result[station_id] = classify(latest, latest_real_age_seconds, now)
+        result[station_id] = classify(latest, latest_real_age_seconds, now, risk_profile)
     return result
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument(
+        "--risk-profile", choices=sorted(RISK_PROFILES), default="standard",
+        help="citizen risk profile to classify for (default: standard)",
+    )
+    args = parser.parse_args()
+
     try:
         client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
         client.admin.command("ping")
@@ -148,9 +188,9 @@ def main():
         print("No readings stored yet -- check producer/consumer logs.")
         sys.exit(1)
 
-    statuses = get_all_station_statuses(collection, station_ids)
+    statuses = get_all_station_statuses(collection, station_ids, args.risk_profile)
 
-    print("Citizen-facing station status (what the app backend would serve)")
+    print(f"Citizen-facing station status (risk_profile={args.risk_profile})")
     print("=" * 72)
     for station_id, info in statuses.items():
         print(f"\n{station_id}: {info['status'].upper()}")

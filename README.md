@@ -49,13 +49,20 @@ loses data.
 ### Two different reliability needs: planners vs. a citizen-facing app
 
 Kafka's delivery guarantee (nothing lost between producer and MongoDB) is
-not the same thing as what each end user actually needs from the data:
+not the same thing as what each end user actually needs from the data, and
+the two needs aren't even the same *kind* of reliability:
 
 - **Planners** don't want raw 10-second samples. `planner_queries.py` rolls
   readings up into daily per-station statistics instead, and
   `materialize_daily_stats.py` persists that rollup into
   `daily_station_stats` so history survives past the 90-day TTL on raw
-  readings (see "Retention" below).
+  readings (see "Retention" below). The rollup's mean/min/max/precipitation
+  figures are computed from real (`source="api"`) readings only -- blending
+  in fallback-simulator values would quietly make a day's trend number less
+  trustworthy with no visible sign of it. Each daily row also reports
+  `api_coverage_pct`, the share of that day's readings that were real, so a
+  planner can see (and discount) a low-confidence day instead of that being
+  silently baked into the average.
 - **A citizen deciding whether to go outside** needs to know the *current*
   reading is trustworthy, not just that some reading was stored. During an
   API outage the fallback simulator keeps publishing fresh-looking
@@ -64,7 +71,13 @@ not the same thing as what each end user actually needs from the data:
   `citizen_status.py` separately tracks the age of the last *real*
   (`source="api"`) reading and classifies each station as
   `ok` / `stale` / `unavailable` based on that instead (see the module
-  docstring for the full logic).
+  docstring for the full logic). It also accepts a `--risk-profile`
+  (`standard`, default, or `vulnerable`): a reading that's fine to label
+  "a bit older, use with caution" for the general public isn't necessarily
+  an acceptable basis for a health-sensitive person to decide whether it's
+  safe to go outside, so `vulnerable` halves the thresholds and tells the
+  app to actively recommend against relying on a stale reading rather than
+  just showing its age.
 
 `verify_citizen_failover.py` forces a real outage against the running
 stack and checks that the status actually flips to `unavailable` and back
@@ -154,7 +167,8 @@ python scripts/check_status.py
 ```
 
 To see the query strategy a city planner would actually use -- daily
-per-station trend aggregates instead of raw readings:
+per-station trend aggregates computed from real readings only, with an
+API-coverage figure for each day:
 
 ```bash
 python scripts/planner_queries.py --days 30
@@ -162,10 +176,12 @@ python scripts/planner_queries.py --days 30
 
 To see the reliability contract a citizen-facing app backend would call
 (ok / stale / unavailable per station, never presenting a stale reading
-as current conditions):
+as current conditions), for the general public or for a risk-sensitive
+profile with tighter thresholds:
 
 ```bash
 python scripts/citizen_status.py
+python scripts/citizen_status.py --risk-profile vulnerable
 ```
 
 To persist the daily aggregation into a `daily_station_stats` collection
@@ -208,9 +224,9 @@ docker-compose.yml      Orchestrates Kafka, MongoDB, producer, consumer
 producer/                Kafka producer: fetches Open-Meteo data or falls back to simulator
 consumer/                Kafka consumer: writes readings into MongoDB with retry
 scripts/                 check_status.py: host-side pipeline health check (fails on staleness or dead letters)
-                          planner_queries.py: daily trend aggregation for city planners
+                          planner_queries.py: daily trend aggregation (real readings only, with API coverage) for city planners
                           materialize_daily_stats.py: persists the daily aggregation past raw-data TTL expiry
-                          citizen_status.py: ok/stale/unavailable reliability contract for a citizen app
+                          citizen_status.py: ok/stale/unavailable reliability contract for a citizen app, with a --risk-profile option
                           verify_citizen_failover.py: end-to-end test that the contract catches a real outage
 docs/                    Portfolio submission texts (Phase 1 concept, Phase 2 explanation)
 ```

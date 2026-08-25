@@ -27,21 +27,44 @@ usage instructions are in the repository's README.md.
   collection instead of dropping them.
 - scripts/planner_queries.py, materialize_daily_stats.py,
   citizen_status.py and check_status.py implement the query and
-  reliability contracts described in the README.
+  reliability contracts described below and in the README.
 - The project is on a public GitHub repository so it can be cloned and
   run end-to-end with one command.
 
 ## Reflection on feedback so far
 
-Earlier feedback was that the technical choices were sound but not
-clearly tied to what planners and the citizen app actually need from
-the data. I addressed that with working code rather than just
-description: planner_queries.py and materialize_daily_stats.py give
-planners daily aggregates instead of raw samples, and citizen_status.py
-separates "the data was delivered" from "this specific reading is safe
-to show as current" - which matters because the fallback simulator
-keeps producing fresh-looking readings during an outage, so message age
-alone isn't enough to tell a broken sensor from a working one.
+Earlier feedback was that the two user types were sketched as
+superficial stories, and that Kafka's delivery reliability is not the
+same thing as what a planner or a citizen actually needs from the data
+operationally - concretely: how much data and what kind of query does
+planning actually require, and how does "reliable" cash out for a
+citizen deciding whether it's safe to go outside?
+
+I addressed both with working code, not just description. For
+planners, planner_queries.py answers the query question directly: a
+MongoDB aggregation rolls raw 10-second readings up into daily
+per-station mean/min/max, because a regression is not a day-by-day
+operation. It also excludes fallback-simulator readings from those
+figures and reports what share of each day's readings were real
+(api_coverage_pct) - averaging in synthetic values would quietly make a
+trend number less trustworthy with no visible sign of it, so a planner
+can see and discount a low-confidence day instead of that being baked
+into the number silently.
+
+For the citizen app, citizen_status.py separates "the data was
+delivered" from "this specific reading is safe to show as current":
+during an outage the fallback simulator keeps producing fresh-looking
+readings, so message age alone would report a broken sensor as fine.
+Beyond that distinction, I also operationalized that "reliable enough"
+is itself use-case-dependent: a reading that's fine to label "a bit
+older, use with caution" for the general public is not necessarily an
+acceptable basis for a health-sensitive person (e.g. an elderly citizen
+deciding whether to go outside) to act on. citizen_status.py now takes
+an optional risk_profile ("standard" or "vulnerable") that halves the
+staleness thresholds and switches the advisory text from a passive age
+label to an active recommendation against relying on the reading.
+
 verify_citizen_failover.py forces a real outage against the running
-stack to check that this actually works rather than just assuming the
-logic is correct; details are in the module docstrings and the README.
+stack and checks that the status contract actually flips to
+unavailable and back, rather than just assuming the logic is correct on
+paper. Details are in the module docstrings and the README.
