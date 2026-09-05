@@ -72,3 +72,19 @@ verify_citizen_failover.py forces a real outage against the running
 stack and checks that the status contract actually flips to
 unavailable and back, rather than just assuming the logic is correct on
 paper. Details are in the module docstrings and the README.
+
+## Note on the fallback simulator
+
+One limitation is worth stating explicitly. The fallback simulator
+exists only because the public Open-Meteo API stands in for sensor
+hardware that has not been installed yet, and it keeps the demo
+pipeline alive through real network hiccups like the timeouts observed
+during testing. This approach would not transfer to genuine hardware:
+a real sensor failure should never be papered over with a synthesized,
+plausible looking value at the ingestion layer. A production
+deployment would instead need the edge device to buffer readings
+locally and forward them once connectivity returns, while the system
+honestly reports the sensor as offline. citizen_status.py already
+reflects this distinction: it treats a simulated reading as
+untrustworthy for the citizen facing contract, so nobody ever sees
+fabricated data presented as current conditions.
